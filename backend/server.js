@@ -7,6 +7,7 @@ const { connectDB }  = require('./database/connection');
 
 const app  = express();
 const PORT = process.env.PORT || 8000;
+const HOST = process.env.HOST || '0.0.0.0';
 
 app.use(helmet({ crossOriginResourcePolicy: false }));
 app.use(cors({
@@ -31,7 +32,9 @@ app.use((e,_q,r,_n) => r.status(500).json({ error: e.message || 'Server error' }
 
 (async () => {
   await connectDB();
-  app.listen(PORT, () => console.log(`\n CubeVision API → http://localhost:${PORT}\n Health       → http://localhost:${PORT}/api/health\n`));
+  app.listen(PORT, HOST, () => {
+  console.log(`CubeVision API running on http://${HOST}:${PORT}`);
+});
 })();
 
 module.exports = app;
