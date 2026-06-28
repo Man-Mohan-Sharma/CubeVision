@@ -2,10 +2,6 @@
 ### Rubik's Cube Recognition, User Accounts, and Optimal Solution Generation
 **Final Year B.Tech Major Project**
 
-> Pure Node.js backend — no Python, no C compilation, no Build Tools needed.
-
-## What changed in this build
-
 - Reworked image processing: the detector now calibrates from the center sticker of each uploaded face instead of relying only on fixed HSV thresholds.
 - Invalid detections no longer throw the user back to upload. The app shows the detected grid and lets the user correct stickers in Manual Edit.
 - Added JWT authentication: register, login, logout, `/api/auth/me`.
@@ -80,8 +76,3 @@ cd ../frontend
 npm run build
 ```
 
-## Docker
-
-```bash
-docker compose up --build
-```
