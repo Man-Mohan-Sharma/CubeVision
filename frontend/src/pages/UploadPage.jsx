@@ -6,8 +6,7 @@ import { ArrowRight, Loader2, CheckCircle, AlertCircle, RefreshCw, Info, Edit3, 
 import clsx from 'clsx'
 import FaceUploader from '../components/FaceUploader'
 import CubeStateDisplay from '../components/CubeStateDisplay'
-import ColorEditor from '../components/ColorEditor'
-import ManualCubeBuilder from '../components/ManualCubeBuilder'
+import CubeEditor3D from '../components/CubeEditor3D'
 import { useSolve } from '../hooks/useSolve'
 import { validateCube } from '../services/api'
 import { useAuth } from '../context/AuthContext'
@@ -20,7 +19,7 @@ const TIPS = [
   '🙌 Keep fingers/hands away from the sticker area',
   '🔲 Fill the frame with the cube face — cube should be large',
   '🚫 Avoid glare — tilt slightly if stickers are shiny',
-  '🎨 If detection is wrong, use the manual color editor below',
+  '🎨 If detection is wrong, use the 3D editor and face-rotate buttons below',
 ]
 
 const COLOR_HEX = { white:'#F5F5F5', yellow:'#FFD700', red:'#EF2B24', orange:'#FF6B35', blue:'#0051A2', green:'#009B48', '?':'#555' }
@@ -132,8 +131,8 @@ export default function UploadPage() {
         <h1 className="font-display font-bold text-4xl text-white mb-3">Solve Your Cube</h1>
         <p className="text-gray-400 max-w-xl mx-auto">
           {mode==='photo'
-            ? 'Upload a clear photo of each face. If detection is inaccurate, use the manual color editor.'
-            : 'Skip photo detection entirely — pick every sticker color by hand on the grids below.'}
+            ? 'Upload a clear photo of each face. If detection is inaccurate, use the 3D editor.'
+            : 'Skip photo detection entirely — paint the cube by hand in the 3D editor.'}
         </p>
       </div>
 
@@ -167,7 +166,11 @@ export default function UploadPage() {
         <motion.div initial={{opacity:0}} animate={{opacity:1}} className="space-y-5">
           <div className="card p-5">
             <h2 className="font-display font-semibold text-white mb-4">Build Cube State Manually</h2>
-            <ManualCubeBuilder onStateChange={handleManualStateChange}/>
+            <CubeEditor3D
+              title="3D Manual Cube Builder"
+              initialState={manualState}
+              onStateChange={handleManualStateChange}
+            />
           </div>
 
           {manualState && (
@@ -253,7 +256,7 @@ export default function UploadPage() {
                 <p key={i} className={clsx('text-xs', i===0?'text-gray-300':'text-yellow-400 mt-1')}>{line}</p>
               ))}
               <p className="text-xs text-gray-500 mt-2">
-                <strong className="text-white">Fix:</strong> Use the <strong className="text-accent">manual color editor</strong> below to correct any wrong stickers, or reset and retake photos.
+                <strong className="text-white">Fix:</strong> Use the <strong className="text-accent">3D editor</strong> below to correct wrong stickers or rotate uploaded face grids.
               </p>
             </div>
           </div>
@@ -307,9 +310,13 @@ export default function UploadPage() {
                       <div className="flex items-center gap-2 mb-3">
                         <Edit3 size={14} className="text-accent"/>
                         <span className="text-accent text-sm font-semibold">Manual Color Correction</span>
-                        <span className="text-gray-500 text-xs">— Click a color, then click any sticker to repaint it</span>
+                        <span className="text-gray-500 text-xs">— Paint stickers and rotate face grids if photos were sideways</span>
                       </div>
-                      <ColorEditor faceResults={uploadResult.face_results} onStateChange={handleStateChange}/>
+                      <CubeEditor3D
+                          title="3D Photo Correction Editor"
+                          initialState={activeState}
+                          onStateChange={handleStateChange}
+                        />
                     </div>
                   </motion.div>
                 )}
@@ -348,7 +355,7 @@ export default function UploadPage() {
                   ))}
                   {!activeValidation.is_valid && (
                     <p className="text-xs text-gray-400 mt-2">
-                      👆 Click <strong className="text-accent">Manual Edit</strong> above to fix wrong stickers and try again.
+                      👆 Click <strong className="text-accent">Manual Edit</strong> above, fix colors, and use face rotate buttons if a face photo was sideways.
                     </p>
                   )}
                   {activeValidation.is_valid && activeValidation.checks_passed?.length>0 && (
