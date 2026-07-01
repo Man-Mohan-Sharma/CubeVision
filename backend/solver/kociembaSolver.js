@@ -1,197 +1,153 @@
+/**
+ * Man Mohan Sharma proper solver fix.
+ *
+ * No fake / hard-coded solutions.
+ * Every solution returned here is verified by applying the moves back to the
+ * exact submitted cube state and checking the final state is solved.
+ */
 const Cube = require('cubejs');
+const {
+  cleanState,
+  strictCubeFromString,
+  buildStateSequence,
+  SOLVED_STATE,
+} = require('../cube/strictCube');
 
 let solverReady = false;
 
+function normalizeCubeState(value) {
+  return cleanState(value).replace(/[^URFDLB]/g, '');
+}
+
 function ensureSolverInitialized() {
   if (solverReady) return;
-
   const t0 = Date.now();
-  console.log('🧩 Initialising Kociemba two-phase solver tables (one-time, ~4-5s)…');
+  console.log('🧩 Initialising Kociemba two-phase solver tables (one-time)…');
   Cube.initSolver();
   solverReady = true;
   console.log(`✅ Solver tables ready in ${Date.now() - t0}ms`);
 }
 
-ensureSolverInitialized();
-
-const DEFAULT_MAX_DEPTH = Number(process.env.SOLVER_MAX_DEPTH || 20);
-const DEFAULT_TIMEOUT_MS = Number(process.env.SOLVER_TIMEOUT_MS || 15000);
-
 function splitMoves(solution) {
   return String(solution || '').trim().split(/\s+/).filter(Boolean);
 }
 
-function verifySolution(state, solution) {
-  const verifier = Cube.fromString(state);
-  if (String(solution || '').trim()) {
-    verifier.move(solution);
-  }
-  return verifier.isSolved();
+function getMaxDepth() {
+  const raw = Number.parseInt(process.env.SOLVER_MAX_DEPTH || '30', 10);
+  if (!Number.isFinite(raw)) return 30;
+  return Math.max(21, Math.min(raw, 35));
 }
 
-function trySolveAtDepth(state, depth) {
+function verifySolution(state, moves) {
   try {
-    const cube = Cube.fromString(state);
-    const solution = cube.solve(depth);
-
-    if (typeof solution !== 'string') return null;
-
-    const moves = splitMoves(solution);
-
-    // If cubejs ignores maxDepth or returns a longer solution, do not accept it for this depth.
-    if (moves.length > depth) return null;
-
-    if (!verifySolution(state, solution)) return null;
-
+    const sequence = buildStateSequence(state, moves);
+    const finalState = sequence[sequence.length - 1];
     return {
-      solution,
-      moves,
-      move_count: moves.length,
-      verified: true,
+      ok: finalState === SOLVED_STATE,
+      final_state: finalState,
+      state_sequence: sequence,
     };
-  } catch (_) {
-    return null;
+  } catch (err) {
+    return {
+      ok: false,
+      error: err?.message || 'Verification failed.',
+    };
   }
-}
-
-function tryFallbackSolve(state) {
-  const cube = Cube.fromString(state);
-  const solution = cube.solve();
-  const moves = splitMoves(solution);
-
-  if (!verifySolution(state, solution)) {
-    return null;
-  }
-
-  return {
-    solution,
-    moves,
-    move_count: moves.length,
-    verified: true,
-  };
-}
-
-function findShortestVerifiedSolution(state, maxDepth, timeoutMs) {
-  const startedAt = Date.now();
-
-  // Iterative deepening: try 0, 1, 2, ... maxDepth.
-  // First verified solution found at the lowest depth is the shortest solution
-  // found by cubejs within this depth limit.
-  for (let depth = 0; depth <= maxDepth; depth += 1) {
-    if (Date.now() - startedAt > timeoutMs) {
-      return {
-        success: false,
-        timeout: true,
-        error: `Optimal-depth search timed out after ${timeoutMs}ms. Try increasing SOLVER_TIMEOUT_MS or use a simpler cube state.`,
-      };
-    }
-
-    const result = trySolveAtDepth(state, depth);
-
-    if (result) {
-      return {
-        success: true,
-        ...result,
-        optimal_depth_found: depth,
-        search_depth_limit: maxDepth,
-        search_mode: 'iterative-depth shortest verified search',
-      };
-    }
-  }
-
-  return {
-    success: false,
-    error: `No verified solution found up to depth ${maxDepth}.`,
-  };
 }
 
 class KociembaSolver {
   solve(stateStr) {
-    if (typeof stateStr !== 'string' || stateStr.length !== 54) {
+    const t0 = Date.now();
+    const state = normalizeCubeState(stateStr);
+
+    if (state.length !== 54) {
       return {
         success: false,
-        error: 'State must be exactly 54 characters.',
+        error: `State must be exactly 54 URFDLB stickers after cleanup. Got ${state.length}.`,
+        cube_state_used: state,
       };
     }
 
-    ensureSolverInitialized();
-    const t0 = Date.now();
+    if (!/^[URFDLB]{54}$/.test(state)) {
+      return {
+        success: false,
+        error: 'State contains invalid characters. Only U R F D L B are allowed.',
+        cube_state_used: state,
+      };
+    }
 
     try {
-      const state = stateStr.toUpperCase().trim();
+      // Strict physical-cube check before solving. This catches wrong U/D scans,
+      // mirrored corners, duplicate cubies, impossible parity, etc.
+      const cube = strictCubeFromString(state);
 
-      if (!/^[URFDLB]{54}$/.test(state)) {
-        return {
-          success: false,
-          error: 'State contains invalid characters. Only U, R, F, D, L, B are allowed.',
-        };
-      }
-
-      const cube = Cube.fromString(state);
-
-      if (cube.isSolved()) {
+      if (state === SOLVED_STATE || cube.isSolved()) {
         return {
           success: true,
           solution: '',
           moves: [],
           move_count: 0,
           verified: true,
-          optimal_depth_found: 0,
+          final_state: state,
+          state_sequence: [state],
+          cube_state_used: state,
           execution_time_ms: Date.now() - t0,
-          algorithm: 'Kociemba Two-Phase shortest verified search (cubejs)',
+          algorithm: 'Already solved',
         };
       }
 
-      const maxDepth = Number.isFinite(DEFAULT_MAX_DEPTH) ? DEFAULT_MAX_DEPTH : 20;
-      const timeoutMs = Number.isFinite(DEFAULT_TIMEOUT_MS) ? DEFAULT_TIMEOUT_MS : 15000;
+      ensureSolverInitialized();
+      const maxDepth = getMaxDepth();
+      const solution = cube.solve(maxDepth);
+      const moves = splitMoves(solution);
 
-      const shortest = findShortestVerifiedSolution(state, maxDepth, timeoutMs);
-
-      if (shortest.success) {
+      if (!moves.length) {
         return {
-          ...shortest,
-          execution_time_ms: Date.now() - t0,
-          algorithm: 'Kociemba Two-Phase shortest verified search (cubejs)',
-          note:
-            'This returns the shortest verified solution found by cubejs within the configured depth limit. Exact mathematical optimal solving for every cube is much slower.',
+          success: false,
+          error: `No solution was returned within max depth ${maxDepth}. Recheck cube state or set SOLVER_MAX_DEPTH=35.`,
+          cube_state_used: state,
         };
       }
 
-      // Fallback: if strict shortest search fails or times out, still try normal cubejs once.
-      // But never show it unless verification passes.
-      const fallback = tryFallbackSolve(state);
-
-      if (fallback) {
+      const verification = verifySolution(state, moves);
+      if (!verification.ok) {
         return {
-          success: true,
-          ...fallback,
-          verified: true,
-          optimal_depth_found: null,
-          search_depth_limit: maxDepth,
-          search_mode: 'fallback verified Kociemba solve',
-          execution_time_ms: Date.now() - t0,
-          algorithm: 'Kociemba Two-Phase verified fallback (cubejs)',
-          warning:
-            shortest.error ||
-            'Shortest-depth search did not finish, so a verified fallback solution is shown instead.',
+          success: false,
+          error:
+            verification.error ||
+            'Kociemba returned moves, but applying them did not solve the submitted cube state. Recheck colors/orientation.',
+          verification_failed: true,
+          final_state: verification.final_state,
+          cube_state_used: state,
         };
       }
 
       return {
-        success: false,
-        error:
-          shortest.error ||
-          'No verified solution found. The cube state is probably inconsistent. Recheck sticker colors and face orientation.',
+        success: true,
+        solution: moves.join(' '),
+        moves,
+        move_count: moves.length,
+        verified: true,
+        final_state: verification.final_state,
+        state_sequence: verification.state_sequence,
+        cube_state_used: state,
+        execution_time_ms: Date.now() - t0,
+        algorithm: `Kociemba Two-Phase (cubejs, verified, maxDepth ${maxDepth})`,
       };
     } catch (err) {
       return {
         success: false,
         error:
           err?.message ||
-          'This cube state is not solvable. Please recheck every sticker color and face orientation.',
+          'This cube state is not physically solvable. Recheck every sticker color and face orientation.',
+        cube_state_used: state,
       };
     }
   }
 }
 
-module.exports = { KociembaSolver };
+module.exports = {
+  KociembaSolver,
+  normalizeCubeState,
+  verifySolution,
+};

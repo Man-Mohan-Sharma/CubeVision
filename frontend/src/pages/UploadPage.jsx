@@ -19,7 +19,7 @@ const TIPS = [
   '🙌 Keep fingers/hands away from the sticker area',
   '🔲 Fill the frame with the cube face — cube should be large',
   '🚫 Avoid glare — tilt slightly if stickers are shiny',
-  '🎨 If detection is wrong, use the 3D editor and face-rotate buttons below',
+  '🎨 If detection is wrong, use the 3D editor, U/D swap, and face-rotate buttons below',
 ]
 
 const COLOR_HEX = { white:'#F5F5F5', yellow:'#FFD700', red:'#EF2B24', orange:'#FF6B35', blue:'#0051A2', green:'#009B48', '?':'#555' }
@@ -63,9 +63,19 @@ export default function UploadPage() {
   const stepIndex = step==='upload'?0:step==='detected'?1:2
 
   const handleDetect = async () => {
+    setShowEditor(false)
+    setEditedState(null)
+    setEditValidation(null)
     const tid = toast.loading('Analysing face images…')
     await processImages()
     toast.dismiss(tid)
+  }
+
+  const handleFullReset = () => {
+    setShowEditor(false)
+    setEditedState(null)
+    setEditValidation(null)
+    reset()
   }
 
   // When user edits colors manually (correction mode), re-validate
@@ -102,7 +112,8 @@ export default function UploadPage() {
     toast.dismiss(tid)
     if (result?.success) {
       toast.success(`Solved in ${result.move_count} moves!${result.saved_to_account ? ' Saved to your account.' : ''}`)
-      navigate('/solution', { state:{ solve:result, upload:{ cube_state: manualState } } })
+      const solveForPage = { ...result, cube_state: result.cube_state || manualState }
+      navigate('/solution', { state:{ solve: solveForPage, upload:{ cube_state: manualState } } })
     } else {
       toast.error(result?.error || 'Solver failed')
     }
@@ -119,7 +130,9 @@ export default function UploadPage() {
     toast.dismiss(tid)
     if (result?.success) {
       toast.success(`Solved in ${result.move_count} moves!${result.saved_to_account ? ' Saved to your account.' : ''}`)
-      navigate('/solution', { state:{ solve:result, upload:uploadResult } })
+      const solveForPage = { ...result, cube_state: result.cube_state || activeState }
+      const uploadForPage = { ...(uploadResult || {}), cube_state: activeState, validation: activeValidation }
+      navigate('/solution', { state:{ solve: solveForPage, upload: uploadForPage } })
     } else {
       toast.error(result?.error || 'Solver failed')
     }
@@ -140,14 +153,14 @@ export default function UploadPage() {
       <div className="flex justify-center mb-8">
         <div className="inline-flex p-1 rounded-xl bg-dark-card border border-dark-border">
           <button
-            onClick={() => setMode('photo')}
+            onClick={() => { setMode('photo'); setManualState(null); setManualValidation(null) }}
             className={clsx('flex items-center gap-2 px-5 py-2.5 rounded-lg text-sm font-semibold transition-all',
               mode==='photo' ? 'bg-primary text-white shadow' : 'text-gray-400 hover:text-white')}
           >
             <Camera size={15}/>Photo Upload
           </button>
           <button
-            onClick={() => setMode('manual')}
+            onClick={() => { setMode('manual'); setShowEditor(false); setEditedState(null); setEditValidation(null) }}
             className={clsx('flex items-center gap-2 px-5 py-2.5 rounded-lg text-sm font-semibold transition-all',
               mode==='manual' ? 'bg-primary text-white shadow' : 'text-gray-400 hover:text-white')}
           >
@@ -167,6 +180,7 @@ export default function UploadPage() {
           <div className="card p-5">
             <h2 className="font-display font-semibold text-white mb-4">Build Cube State Manually</h2>
             <CubeEditor3D
+              key="manual-cube-editor"
               title="3D Manual Cube Builder"
               initialState={manualState}
               onStateChange={handleManualStateChange}
@@ -310,9 +324,10 @@ export default function UploadPage() {
                       <div className="flex items-center gap-2 mb-3">
                         <Edit3 size={14} className="text-accent"/>
                         <span className="text-accent text-sm font-semibold">Manual Color Correction</span>
-                        <span className="text-gray-500 text-xs">— Paint stickers and rotate face grids if photos were sideways</span>
+                        <span className="text-gray-500 text-xs">— Paint stickers, rotate face grids, or use U/D swap buttons if white/yellow are opposite</span>
                       </div>
                       <CubeEditor3D
+                          key={`photo-editor-${uploadResult?.cube_state || 'empty'}`}
                           title="3D Photo Correction Editor"
                           initialState={activeState}
                           onStateChange={handleStateChange}
@@ -367,7 +382,7 @@ export default function UploadPage() {
           )}
 
           <div className="flex flex-wrap gap-4 justify-center">
-            <button onClick={reset} className="btn-secondary flex items-center gap-2">
+            <button onClick={handleFullReset} className="btn-secondary flex items-center gap-2">
               <RefreshCw size={16}/>Reset & Retake
             </button>
             <button onClick={handleSolve} disabled={!isReadyToSolve||loading} className="btn-accent flex items-center gap-2 px-10">

@@ -4,7 +4,11 @@ import clsx from 'clsx'
 
 const SOLVED_STATE = 'UUUUUUUUURRRRRRRRRFFFFFFFFFDDDDDDDDDLLLLLLLLLBBBBBBBBB'
 const FACE_ORDER = ['U', 'R', 'F', 'D', 'L', 'B']
+const FACE_START = { U: 0, R: 9, F: 18, D: 27, L: 36, B: 45 }
 const CENTER_INDEXES = new Set([4, 13, 22, 31, 40, 49])
+const CENTER_LETTERS = { 4: 'U', 13: 'R', 22: 'F', 31: 'D', 40: 'L', 49: 'B' }
+const DEFAULT_ROTATION = { x: -0.45, y: 0.7, z: 0.05 }
+const DEFAULT_CAMERA = { x: 4.8, y: 4.2, z: 5.8 }
 
 const COLORS = {
   U: { name: 'White', hex: '#F5F5F5', three: 0xf5f5f5 },
@@ -15,9 +19,23 @@ const COLORS = {
   B: { name: 'Orange', hex: '#FF6B35', three: 0xff6b35 },
 }
 
+function cleanState(value) {
+  return typeof value === 'string'
+    ? value.toUpperCase().replace(/[\s\u200B-\u200D\uFEFF]/g, '')
+    : ''
+}
+
+function lockCenters(state) {
+  const arr = state.split('')
+  for (const [index, letter] of Object.entries(CENTER_LETTERS)) {
+    arr[Number(index)] = letter
+  }
+  return arr.join('')
+}
+
 function normaliseState(value) {
-  const state = typeof value === 'string' ? value.toUpperCase().trim() : ''
-  return /^[URFDLB]{54}$/.test(state) ? state : SOLVED_STATE
+  const state = cleanState(value)
+  return /^[URFDLB]{54}$/.test(state) ? lockCenters(state) : SOLVED_STATE
 }
 
 function countColors(state) {
@@ -27,11 +45,9 @@ function countColors(state) {
 }
 
 function rotateNine(cells, direction) {
-  // clockwise: 6 3 0 / 7 4 1 / 8 5 2
   if (direction === 'cw') {
     return [cells[6], cells[3], cells[0], cells[7], cells[4], cells[1], cells[8], cells[5], cells[2]]
   }
-  // counter-clockwise: 2 5 8 / 1 4 7 / 0 3 6
   return [cells[2], cells[5], cells[8], cells[1], cells[4], cells[7], cells[0], cells[3], cells[6]]
 }
 
@@ -41,25 +57,40 @@ function rotateFaceInState(state, face, direction) {
 
   const start = faceIndex * 9
   const arr = state.split('')
-  const oldFace = arr.slice(start, start + 9)
-  const newFace = rotateNine(oldFace, direction)
+  const newFace = rotateNine(arr.slice(start, start + 9), direction)
 
   for (let i = 0; i < 9; i += 1) arr[start + i] = newFace[i]
+  return lockCenters(arr.join(''))
+}
 
-  // Keep centers fixed.
-  arr[4] = 'U'
-  arr[13] = 'R'
-  arr[22] = 'F'
-  arr[31] = 'D'
-  arr[40] = 'L'
-  arr[49] = 'B'
+function swapLettersInState(state, a, b) {
+  const arr = state.split('')
+  for (let i = 0; i < arr.length; i += 1) {
+    if (CENTER_INDEXES.has(i)) continue
+    if (arr[i] === a) arr[i] = b
+    else if (arr[i] === b) arr[i] = a
+  }
+  return lockCenters(arr.join(''))
+}
 
-  return arr.join('')
+function swapFaceBlocksInState(state, faceA, faceB) {
+  const arr = state.split('')
+  const a = FACE_START[faceA]
+  const b = FACE_START[faceB]
+  if (a === undefined || b === undefined) return state
+
+  for (let i = 0; i < 9; i += 1) {
+    const temp = arr[a + i]
+    arr[a + i] = arr[b + i]
+    arr[b + i] = temp
+  }
+  return lockCenters(arr.join(''))
 }
 
 function makeFacelets() {
   const out = []
 
+  // Kociemba/cubejs facelet order: U R F D L B, each face row-major.
   for (const z of [-1, 0, 1]) for (const x of [-1, 0, 1]) out.push({ x, y: 1, z, normal: 'U' })
   for (const y of [1, 0, -1]) for (const z of [1, 0, -1]) out.push({ x: 1, y, z, normal: 'R' })
   for (const y of [1, 0, -1]) for (const x of [-1, 0, 1]) out.push({ x, y, z: 1, normal: 'F' })
@@ -97,6 +128,17 @@ function placeSticker(mesh, facelet, offset = 0) {
   }
 }
 
+function stopPointerEvent(event) {
+  event?.stopPropagation?.()
+  event?.nativeEvent?.stopImmediatePropagation?.()
+}
+
+function stopUiEvent(event) {
+  event?.preventDefault?.()
+  event?.stopPropagation?.()
+  event?.nativeEvent?.stopImmediatePropagation?.()
+}
+
 export default function CubeEditor3D({
   initialState,
   onStateChange,
@@ -105,6 +147,8 @@ export default function CubeEditor3D({
   const mountRef = useRef(null)
   const onStateChangeRef = useRef(onStateChange)
   const activeColorRef = useRef('F')
+  const originalStateRef = useRef(normaliseState(initialState))
+  const hasUserEditedRef = useRef(false)
   const stateRef = useRef(normaliseState(initialState))
 
   const refs = useRef({
@@ -124,6 +168,11 @@ export default function CubeEditor3D({
 
   const counts = useMemo(() => countColors(cubeState), [cubeState])
 
+  const renderOnce = useCallback(() => {
+    const { renderer, scene, camera } = refs.current
+    if (renderer && scene && camera) renderer.render(scene, camera)
+  }, [])
+
   const syncStickerMaterials = useCallback((state) => {
     const { stickers, materials } = refs.current
     if (!stickers?.length) return
@@ -133,9 +182,12 @@ export default function CubeEditor3D({
       const letter = state[index]
       if (materials[letter]) sticker.material = materials[letter]
     }
-  }, [])
+    renderOnce()
+  }, [renderOnce])
 
-  const commitState = useCallback((nextState) => {
+  const commitState = useCallback((nextRawState, { userEdit = false } = {}) => {
+    const nextState = normaliseState(nextRawState)
+    if (userEdit) hasUserEditedRef.current = true
     stateRef.current = nextState
     setCubeState(nextState)
     syncStickerMaterials(nextState)
@@ -146,22 +198,40 @@ export default function CubeEditor3D({
     if (CENTER_INDEXES.has(index)) return
     const arr = stateRef.current.split('')
     arr[index] = activeColorRef.current
-    commitState(arr.join(''))
+    commitState(arr.join(''), { userEdit: true })
   }, [commitState])
 
   const rotateFace = useCallback((face, direction) => {
-    commitState(rotateFaceInState(stateRef.current, face, direction))
+    commitState(rotateFaceInState(stateRef.current, face, direction), { userEdit: true })
   }, [commitState])
 
-  const resetColors = useCallback(() => {
-    commitState(normaliseState(initialState))
-  }, [commitState, initialState])
+  const resetColors = useCallback((event) => {
+    stopUiEvent(event)
+    hasUserEditedRef.current = false
+    commitState(originalStateRef.current || SOLVED_STATE)
+  }, [commitState])
 
-  const resetView = useCallback(() => {
-    const { group } = refs.current
-    if (!group) return
-    group.rotation.set(-0.45, 0.7, 0.05)
-  }, [])
+  const resetView = useCallback((event) => {
+    stopUiEvent(event)
+    const { group, camera } = refs.current
+    if (group) group.rotation.set(DEFAULT_ROTATION.x, DEFAULT_ROTATION.y, DEFAULT_ROTATION.z)
+    if (camera) {
+      camera.position.set(DEFAULT_CAMERA.x, DEFAULT_CAMERA.y, DEFAULT_CAMERA.z)
+      camera.lookAt(0, 0, 0)
+      camera.updateProjectionMatrix?.()
+    }
+    renderOnce()
+  }, [renderOnce])
+
+  const swapUDColors = useCallback((event) => {
+    stopUiEvent(event)
+    commitState(swapLettersInState(stateRef.current, 'U', 'D'), { userEdit: true })
+  }, [commitState])
+
+  const swapUDFaces = useCallback((event) => {
+    stopUiEvent(event)
+    commitState(swapFaceBlocksInState(stateRef.current, 'U', 'D'), { userEdit: true })
+  }, [commitState])
 
   useEffect(() => {
     onStateChangeRef.current = onStateChange
@@ -172,7 +242,9 @@ export default function CubeEditor3D({
   }, [activeColor])
 
   useEffect(() => {
+    if (hasUserEditedRef.current) return
     const next = normaliseState(initialState)
+    originalStateRef.current = next
     stateRef.current = next
     setCubeState(next)
     syncStickerMaterials(next)
@@ -193,7 +265,7 @@ export default function CubeEditor3D({
 
     const scene = new THREE.Scene()
     const camera = new THREE.PerspectiveCamera(45, width / height, 0.1, 100)
-    camera.position.set(4.8, 4.2, 5.8)
+    camera.position.set(DEFAULT_CAMERA.x, DEFAULT_CAMERA.y, DEFAULT_CAMERA.z)
     camera.lookAt(0, 0, 0)
 
     scene.add(new THREE.AmbientLight(0xffffff, 0.9))
@@ -202,7 +274,7 @@ export default function CubeEditor3D({
     scene.add(light)
 
     const group = new THREE.Group()
-    group.rotation.set(-0.45, 0.7, 0.05)
+    group.rotation.set(DEFAULT_ROTATION.x, DEFAULT_ROTATION.y, DEFAULT_ROTATION.z)
     scene.add(group)
 
     const body = new THREE.Mesh(
@@ -218,7 +290,6 @@ export default function CubeEditor3D({
 
     const borderMaterial = new THREE.MeshBasicMaterial({ color: 0x070707, side: THREE.DoubleSide })
     const centerBorderMaterial = new THREE.MeshBasicMaterial({ color: 0xffffff, side: THREE.DoubleSide })
-
     const stickers = []
 
     for (const facelet of FACELETS) {
@@ -241,7 +312,6 @@ export default function CubeEditor3D({
 
     const raycaster = new THREE.Raycaster()
     const pointer = new THREE.Vector2()
-
     refs.current = { renderer, camera, scene, group, raycaster, pointer, stickers, materials, raf: null }
 
     let isDragging = false
@@ -274,12 +344,10 @@ export default function CubeEditor3D({
 
       const dx = event.clientX - lastX
       const dy = event.clientY - lastY
-
       if (Math.abs(event.clientX - startX) + Math.abs(event.clientY - startY) > 5) moved = true
 
       group.rotation.y += dx * 0.01
       group.rotation.x += dy * 0.01
-
       lastX = event.clientX
       lastY = event.clientY
     }
@@ -332,10 +400,11 @@ export default function CubeEditor3D({
       body.geometry?.dispose?.()
       body.material?.dispose?.()
       renderer.dispose()
-
       if (element.contains(renderer.domElement)) element.removeChild(renderer.domElement)
     }
   }, [paintSticker])
+
+  const controlButtonClass = 'px-3 py-1.5 rounded-lg border border-dark-border text-xs text-gray-300 hover:text-white hover:border-primary/40 transition-all'
 
   return (
     <div className="space-y-4">
@@ -348,10 +417,10 @@ export default function CubeEditor3D({
         </div>
 
         <div className="flex gap-2 flex-wrap">
-          <button type="button" onClick={resetView} className="px-3 py-1.5 rounded-lg border border-dark-border text-xs text-gray-300 hover:text-white">
+          <button type="button" onPointerDownCapture={stopPointerEvent} onMouseDownCapture={stopPointerEvent} onClick={resetView} className={controlButtonClass}>
             Reset view
           </button>
-          <button type="button" onClick={resetColors} className="px-3 py-1.5 rounded-lg border border-dark-border text-xs text-gray-300 hover:text-white">
+          <button type="button" onPointerDownCapture={stopPointerEvent} onMouseDownCapture={stopPointerEvent} onClick={resetColors} className={controlButtonClass}>
             Reset colors
           </button>
         </div>
@@ -380,19 +449,36 @@ export default function CubeEditor3D({
         style={{ height: 430 }}
       />
 
+      <div className="rounded-xl border border-yellow-400/20 p-3 bg-yellow-400/5">
+        <p className="text-xs text-yellow-100 mb-3">
+          If the scan confuses <strong>U/White</strong> and <strong>D/Yellow</strong>, use these one-click fixes before solving.
+        </p>
+        <div className="flex flex-wrap gap-2">
+          <button type="button" onPointerDownCapture={stopPointerEvent} onMouseDownCapture={stopPointerEvent} onClick={swapUDColors} className={controlButtonClass}>
+            Swap U/D colors
+          </button>
+          <button type="button" onPointerDownCapture={stopPointerEvent} onMouseDownCapture={stopPointerEvent} onClick={swapUDFaces} className={controlButtonClass}>
+            Swap U/D faces
+          </button>
+        </div>
+        <p className="text-[11px] text-gray-500 mt-2">
+          Use “Swap U/D colors” when white/yellow stickers are labelled opposite. Use “Swap U/D faces” only when top and bottom photos were assigned to the wrong face slots.
+        </p>
+      </div>
+
       <div className="rounded-xl border border-dark-border p-3 bg-dark-bg/50">
         <p className="text-xs text-gray-400 mb-2">
-          If uploaded cube is marked impossible, rotate the uploaded face grids here. This fixes photos taken sideways/upside-down.
+          If a single uploaded face photo was sideways/upside-down, rotate only that face grid here.
         </p>
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
           {FACE_ORDER.map((face) => (
             <div key={face} className="rounded-lg border border-dark-border p-2 text-center">
               <div className="font-mono text-xs text-gray-300 mb-2">Face {face}</div>
               <div className="flex justify-center gap-2">
-                <button type="button" onClick={() => rotateFace(face, 'ccw')} className="px-2 py-1 rounded-md bg-dark-border text-xs text-gray-300 hover:text-white">
+                <button type="button" onPointerDownCapture={stopPointerEvent} onMouseDownCapture={stopPointerEvent} onClick={() => rotateFace(face, 'ccw')} className="px-2 py-1 rounded-md bg-dark-border text-xs text-gray-300 hover:text-white">
                   ⟲
                 </button>
-                <button type="button" onClick={() => rotateFace(face, 'cw')} className="px-2 py-1 rounded-md bg-dark-border text-xs text-gray-300 hover:text-white">
+                <button type="button" onPointerDownCapture={stopPointerEvent} onMouseDownCapture={stopPointerEvent} onClick={() => rotateFace(face, 'cw')} className="px-2 py-1 rounded-md bg-dark-border text-xs text-gray-300 hover:text-white">
                   ⟳
                 </button>
               </div>

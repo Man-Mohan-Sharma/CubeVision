@@ -14,23 +14,25 @@ export default function SolutionPage() {
       <Link to="/upload" className="btn-primary">Go to Upload</Link>
     </div>
   )
+  const timeMs = Number.isFinite(Number(sv.execution_time_ms)) ? Number(sv.execution_time_ms).toFixed(1) : '—'
+  const cubeState = sv.cube_state || state?.upload?.cube_state
   const STATS=[
     {icon:Hash,label:'Move Count',value:sv.move_count,color:'text-primary'},
-    {icon:Clock,label:'Solve Time',value:`${sv.execution_time_ms.toFixed(1)}ms`,color:'text-accent'},
+    {icon:Clock,label:'Solve Time',value: timeMs === '—' ? '—' : `${timeMs}ms`,color:'text-accent'},
     {icon:Zap,label:'Algorithm',value:'Kociemba Two-Phase',color:'text-yellow-400'},
     {icon:CheckCircle,label:'Status',value:'Valid & Solved',color:'text-green-400'},
   ]
   const exportPDF = () => {
     const doc = new jsPDF()
     doc.setFontSize(22); doc.setTextColor(108,99,255)
-    doc.text('CubeVision — Solve Report', 20, 28)
+    doc.text('Man Mohan Sharma — Solve Report', 20, 28)
     doc.setTextColor(0,0,0); doc.setFontSize(11)
-    const lines=[`Date: ${new Date().toLocaleString()}`,`Algorithm: ${sv.algorithm}`,`Move Count: ${sv.move_count}`,`Time: ${sv.execution_time_ms.toFixed(1)}ms`,'',`Cube State:`,sv.cube_state,'','Solution:']
+    const lines=[`Date: ${new Date().toLocaleString()}`,`Algorithm: ${sv.algorithm}`,`Move Count: ${sv.move_count}`,`Time: ${timeMs}ms`,'',`Cube State:`,cubeState,'','Solution:']
     let y=42; lines.forEach(l=>{doc.text(l,20,y);y+=8})
     let row=''
     sv.solution.split(' ').forEach(m=>{ if((row+m).length>65){doc.text(row.trim(),20,y);y+=8;row=''} row+=m+' ' })
     if(row) doc.text(row.trim(),20,y)
-    doc.save('cubevision-solution.pdf')
+    doc.save('man-mohan-sharma-solution.pdf')
   }
   return (
     <div className="max-w-6xl mx-auto px-4 py-12">
@@ -51,10 +53,10 @@ export default function SolutionPage() {
         <motion.div initial={{opacity:0,x:-20}} animate={{opacity:1,x:0}} transition={{delay:0.1}}>
           <h2 className="font-display font-semibold text-white mb-3">3D Visualization</h2>
           <p className="text-gray-500 text-xs mb-3">Drag to rotate · Play to animate · Step through moves manually</p>
-          <CubeVisualizer3D solution={sv.solution} cubeState={sv.cube_state}/>
+          <CubeVisualizer3D solution={sv.solution} cubeState={cubeState} stateSequence={sv.state_sequence}/>
         </motion.div>
         <motion.div initial={{opacity:0,x:20}} animate={{opacity:1,x:0}} transition={{delay:0.2}} className="space-y-5">
-          <div className="card p-5"><h2 className="font-display font-semibold text-white mb-4">Cube State Net</h2><CubeStateDisplay state={sv.cube_state}/></div>
+          <div className="card p-5"><h2 className="font-display font-semibold text-white mb-4">Cube State Net</h2><CubeStateDisplay state={cubeState}/></div>
           <div className="card p-5">
             <h2 className="font-display font-semibold text-white mb-3">Solution Sequence</h2>
             <div className="flex flex-wrap gap-1.5">
